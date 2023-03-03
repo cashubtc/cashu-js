@@ -1,20 +1,70 @@
-const axios = require("axios").default;
-const { utils, Point } = require("@noble/secp256k1");
-const dhke = require("./dhke");
-const { splitAmount, bytesToNumber, bigIntStringify } = require("./utils");
-const { uint8ToBase64 } = require("./base64");
-const bolt11 = require("bolt11");
-const bech32 = require("bech32");
+const axios = require('axios').default;
+const { utils, Point } = require('@noble/secp256k1');
+const dhke = require('./dhke');
+const { splitAmount, bigIntStringify } = require('./utils');
+const { uint8ToBase64 } = require('./base64');
+const bolt11 = require('bolt11');
+const bech32 = require('bech32');
 
 // local storage for node
-if (typeof localStorage === "undefined" || localStorage === null) {
-  var LocalStorage = require("node-localstorage").LocalStorage;
-  localStorage = new LocalStorage("./scratch");
+if (typeof localStorage === 'undefined' || localStorage === null) {
+  var LocalStorage = require('node-localstorage').LocalStorage;
+  localStorage = new LocalStorage('./scratch');
 }
 
+/**
+ * @typedef {Object} Proof
+ * @property {number} amount
+ * @property {string} C
+ * @property {string} id
+ * @property {string} secret
+ */
+
+/**
+ * @typedef {Object} SerializedBlindedSignature
+ * @property {number} amount
+ * @property {string} C_
+ * @property {string} id
+ */
+
+/**
+ * @typedef {Object} MintResponse
+ * @property {SerializedBlindedSignature[]} promises -
+ */
+
+/**
+ * @typedef {Object} ErrorResponse
+ * @property {string} error -
+ */
+
+/**
+ * @typedef {Object} RequestMintResponse
+ * @property {string} pr -
+ * @property {string} hash -
+ */
+
+/**
+ * @typedef {Object} SplitProofs
+ * @property {Proof[]} fristProofs
+ * @property {Proof[]} scndProofs
+ */
+
+/**
+ * @typedef {Object} KeysetResponse
+ * @property {string[]} keysets -
+ */
+
+/**
+ * Creates a new Wallet
+ * @class
+ */
 class Wallet {
+  /**
+   * @constructs
+   * @param {string} [mintUrl] URL of the mint
+   */
   constructor(mintUrl = null) {
-    this.proofs = JSON.parse(localStorage.getItem("proofs") || "[]");
+    this.proofs = JSON.parse(localStorage.getItem('proofs') || '[]');
 
     if (mintUrl == null) {
       this.mintUrl = MINT_SERVER;
@@ -24,26 +74,34 @@ class Wallet {
   }
 
   // --------- GET /keys
-
+  /**
+   * Gets public keys of the mint
+   */
   async loadMint() {
-    /* Gets public keys of the mint */
     this.keys = await this.getKeysApi();
     this.keysets = await this.getKeysetsApi();
     this.mints = [{ url: this.mintUrl, keysets: this.keysets }];
   }
 
+  /**
+   * @returns {Object<string, string>}
+   */
   async getKeysApi() {
     const { data } = await axios.get(`${this.mintUrl}/keys`);
     return data;
   }
 
+  /**
+   *
+   * @returns {KeysetResponse}
+   */
   async getKeysetsApi() {
     const { data } = await axios.get(`${this.mintUrl}/keysets`);
     return data.keysets;
   }
   // --------- POST /mint
 
-  /* 
+  /*
   
   Mint new tokens by providing a payment hash corresponding to a paid Lightning invoice. 
 
@@ -53,7 +111,13 @@ class Wallet {
   
   */
 
-  async mintApi(amounts, paymentHash = "") {
+  /**
+   *
+   * @param {number[]} amounts
+   * @param {string} [paymentHash]
+   * @returns {Proof[]}
+   */
+  async mintApi(amounts, paymentHash = '') {
     let secrets = await this.generateSecrets(amounts);
     let { outputs, rs } = await this.constructOutputs(amounts, secrets);
     let postMintRequest = { outputs: outputs };
@@ -75,6 +139,11 @@ class Wallet {
     return proofs;
   }
 
+  /**
+   * @param {number} amount
+   * @param {string} hash
+   * @returns {Promise<Proof[]>}
+   */
   async mint(amount, hash) {
     try {
       const amounts = splitAmount(amount);
@@ -92,6 +161,10 @@ class Wallet {
 
   /* Request to mint new tokens of a given amount. Mint will return a Lightning invoice that the user has to pay. */
 
+  /**
+   * @param {number} amount
+   * @returns {Promise<RequestMintResponse | ErrorResponse>}
+   */
   async requestMintApi(amount) {
     const getMintResponse = await axios.get(`${this.mintUrl}/mint`, {
       params: {
@@ -102,6 +175,10 @@ class Wallet {
     return getMintResponse.data;
   }
 
+  /**
+   * @param {number} amount
+   * @returns {Promise<RequestMintResponse>}
+   */
   async requestMint(amount) {
     try {
       const invoice = await this.requestMintApi(amount);
@@ -113,7 +190,12 @@ class Wallet {
   }
 
   // --------- POST /split
-
+  /**
+   *
+   * @param {Proof[]} proofs
+   * @param {number} amount
+   * @returns
+   */
   async splitApi(proofs, amount) {
     try {
       const total = this.sumProofs(proofs);
@@ -125,7 +207,7 @@ class Wallet {
       amounts.push(...scnd_amounts);
       let secrets = await this.generateSecrets(amounts);
       if (secrets.length != amounts.length) {
-        throw new Error("number of secrets does not match number of outputs.");
+        throw new Error('number of secrets does not match number of outputs.');
       }
       let { outputs, rs } = await this.constructOutputs(amounts, secrets);
       const postSplitRequest = {
@@ -161,14 +243,17 @@ class Wallet {
     }
   }
 
-  async split(proofs, amount) {
-    /*
-        supplies proofs and requests a split from the mint of these
+  /**
+   * supplies proofs and requests a split from the mint of these
         proofs at a specific amount
-        */
+   * @param {Proof[]} proofs 
+   * @param {number} amount 
+   * @returns {Promise<SplitProofs>}
+   */
+  async split(proofs, amount) {
     try {
       if (proofs.length == 0) {
-        throw new Error("no proofs provided.");
+        throw new Error('no proofs provided.');
       }
       let { fristProofs, scndProofs } = await this.splitApi(proofs, amount);
       this.deleteProofs(proofs);
@@ -182,17 +267,21 @@ class Wallet {
     }
   }
 
+  /**
+   * splits proofs so the user can keep firstProofs, send scndProofs.
+   * then sets scndProofs as reserved.
+   *
+   * if invalidate, scndProofs (the one to send) are invalidated
+   * @param {Proof[]} proofs
+   * @param {number} amount
+   * @param {boolean} [invlalidate]
+   * @returns {Promise<SplitProofs>}
+   */
   async splitToSend(proofs, amount, invlalidate = false) {
-    /*
-        splits proofs so the user can keep firstProofs, send scndProofs.
-        then sets scndProofs as reserved.
-
-        if invalidate, scndProofs (the one to send) are invalidated
-        */
     try {
       const spendableProofs = proofs.filter((p) => !p.reserved);
       if (this.sumProofs(spendableProofs) < amount) {
-        throw Error("balance too low.");
+        throw Error('balance too low.');
       }
 
       // call /split
@@ -338,7 +427,7 @@ class Wallet {
       let { id, amount, C, secret } = this.promiseToProof(
         promises[i].id,
         promises[i].amount,
-        promises[i]["C_"],
+        promises[i]['C_'],
         encodedSecret,
         rs[i]
       );
@@ -389,19 +478,19 @@ class Wallet {
 
   async lnurlPay(address, amount) {
     if (
-      (address.split("@").length != 2 ||
-        address.toLowerCase().slice(0, 6) != "lnurl1") &&
+      (address.split('@').length != 2 ||
+        address.toLowerCase().slice(0, 6) != 'lnurl1') &&
       !(amount > 0)
     ) {
-      throw Error("wrong input.");
+      throw Error('wrong input.');
     }
 
-    if (address.split("@").length == 2) {
-      let [user, host] = address.split("@");
+    if (address.split('@').length == 2) {
+      let [user, host] = address.split('@');
       var { data } = await axios.get(
         `https://${host}/.well-known/lnurlp/${user}`
       );
-    } else if (address.toLowerCase().slice(0, 6) === "lnurl1") {
+    } else if (address.toLowerCase().slice(0, 6) === 'lnurl1') {
       let host = Buffer.from(
         bech32.fromWords(bech32.decode(address, 20000).words)
       ).toString();
@@ -409,7 +498,7 @@ class Wallet {
     }
 
     if (
-      data.tag == "payRequest" &&
+      data.tag == 'payRequest' &&
       data.minSendable <= amount * 1000 <= data.maxSendable
     ) {
       var { data } = await axios.get(
@@ -424,7 +513,7 @@ class Wallet {
 
   storeProofs() {
     localStorage.setItem(
-      "proofs",
+      'proofs',
       JSON.stringify(this.proofs, bigIntStringify)
     );
   }
@@ -440,7 +529,7 @@ class Wallet {
   // error checking from mint
 
   assertMintError(resp) {
-    if (resp.data.hasOwnProperty("error")) {
+    if (resp.data.hasOwnProperty('error')) {
       const e = `Mint error (code ${resp.data.code}): ${resp.data.error}`;
       throw new Error(e);
     }
