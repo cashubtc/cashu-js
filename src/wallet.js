@@ -21,6 +21,12 @@ if (typeof localStorage === 'undefined' || localStorage === null) {
  */
 
 /**
+ * @typedef {Object} BlindedMessage
+ * @property {number} amount
+ * @property {Point} B_
+ */
+
+/**
  * @typedef {Object} SerializedBlindedSignature
  * @property {number} amount
  * @property {string} C_
@@ -92,7 +98,6 @@ class Wallet {
   }
 
   /**
-   *
    * @returns {KeysetResponse}
    */
   async getKeysetsApi() {
@@ -118,7 +123,7 @@ class Wallet {
    * @returns {Proof[]}
    */
   async mintApi(amounts, paymentHash = '') {
-    let secrets = await this.generateSecrets(amounts);
+    let secrets = this.generateSecrets(amounts);
     let { outputs, rs } = await this.constructOutputs(amounts, secrets);
     let postMintRequest = { outputs: outputs };
     const postMintResponse = await axios.post(
@@ -194,7 +199,7 @@ class Wallet {
    *
    * @param {Proof[]} proofs
    * @param {number} amount
-   * @returns
+   * @returns {Promise<SplitProofs>}
    */
   async splitApi(proofs, amount) {
     try {
@@ -308,10 +313,11 @@ class Wallet {
     }
   }
 
+  /**
+   * Uses the /split endpoint to receive new tokens.
+   * @param {Proof[]} proofs
+   */
   async redeem(proofs) {
-    /*
-    Uses the /split endpoint to receive new tokens.
-    */
     try {
       const amount = proofs.reduce((s, t) => (s += t.amount), 0);
       await this.split(proofs, amount);
@@ -323,6 +329,10 @@ class Wallet {
 
   // --------- POST /melt
 
+  /**
+   * @param {string} invoice
+   * @returns {Promise<void>}
+   */
   async melt(invoice) {
     try {
       const amount_invoice = bolt11.decode(invoice).millisatoshis / 1000;
@@ -351,6 +361,10 @@ class Wallet {
 
   // --------- GET /check
 
+  /**
+   * @param {Proof[]} proofs
+   * @returns {Promise<boolean>}
+   */
   async checkSpendable(proofs) {
     const checkSpendableRequest = {
       proofs: proofs,
@@ -364,7 +378,7 @@ class Wallet {
       let spentProofs = proofs.filter(
         (p, pidx) => !checkSpendableResponse.data.spendable[pidx]
       );
-      var spendable = true;
+      let spendable = true;
       if (spentProofs.length) {
         this.deleteProofs(spentProofs);
         spendable = false;
@@ -378,6 +392,11 @@ class Wallet {
 
   // --------- GET /checkfees
 
+  /**
+   *
+   * @param {string} invoice
+   * @returns {promise<number>}
+   */
   async checkFees(invoice) {
     const getCheckFeesRequest = {
       pr: invoice,
@@ -397,6 +416,11 @@ class Wallet {
 
   // --------- crypto
 
+  /**
+   * Generate and array of random 32 byte secrets
+   * @param {number[]} amounts amount to create secrets for
+   * @returns {Uint8Array[]}
+   */
   generateSecrets(amounts) {
     const secrets = [];
     for (let i = 0; i < amounts.length; i++) {
@@ -406,6 +430,12 @@ class Wallet {
     return secrets;
   }
 
+  /**
+   *
+   * @param {number[]} amounts
+   * @param {Uint8Array[]} secrets
+   * @returns
+   */
   async constructOutputs(amounts, secrets) {
     const outputs = [];
     const rs = [];

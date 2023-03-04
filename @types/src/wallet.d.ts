@@ -87,12 +87,7 @@ export class Wallet {
   getKeysApi(): Promise<string[]>;
   getKeySetsApi(): Promise<{ keysets: string[] }>;
   mintApi(amounts: number[], paymentHash?: string): Promise<Proof[]>;
-  mint(
-    amount: number,
-    hash: string
-  ): Promise<
-    { id: string; amount: number; C: string; secret: string }[] | undefined
-  >;
+  mint(amount: number, hash: string): Promise<Proof[] | undefined>;
   requestMintApi(amount: number): Promise<any>;
   requestMint(amount: number): Promise<any>;
   splitApi(
